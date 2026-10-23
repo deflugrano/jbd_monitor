@@ -1,0 +1,1366 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no">
+<title>LiFePO4 BMS Monitor</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<style>
+/* ════════════════════════════════════════════════════════
+   DESIGN SYSTEM — Dark Glassmorphism + Neon + Particles
+   ════════════════════════════════════════════════════════ */
+:root {
+  --bg: #0a0e1a;
+  --surface: rgba(15, 23, 42, 0.65);
+  --border: rgba(255,255,255,0.06);
+  --glass: rgba(30, 41, 59, 0.45);
+  --text: #f1f5f9;
+  --muted: #64748b;
+  --green: #22c55e;
+  --green-glow: rgba(34,197,94,0.25);
+  --blue: #3b82f6;
+  --blue-glow: rgba(59,130,246,0.2);
+  --red: #ef4444;
+  --red-glow: rgba(239,68,68,0.25);
+  --amber: #f59e0b;
+  --amber-glow: rgba(245,158,11,0.2);
+  --cyan: #06b6d4;
+  --purple: #a855f7;
+  --radius: 20px;
+  --radius-sm: 14px;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', system-ui, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  padding: 16px 16px 100px;
+  min-height: 100vh;
+  overflow-x: hidden;
+  transition: background 2s ease;
+}
+
+/* ─── Animated particle canvas (behind everything) ────── */
+#particleCanvas {
+  position: fixed; top:0; left:0; width:100%; height:100%;
+  z-index: 0; pointer-events: none;
+}
+/* Everything else above canvas */
+.app-content { position: relative; z-index: 1; }
+
+/* ─── Dynamic gradient overlay ───────────────────────── */
+.bg-gradient {
+  position:fixed; top:0; left:0; width:100%; height:100%;
+  z-index:0; pointer-events:none;
+  transition: opacity 2s ease;
+  opacity:0.5;
+}
+
+/* ─── Confetti container ─────────────────────────────── */
+#confetti-container {
+  position:fixed; top:0; left:0; width:100%; height:100%;
+  pointer-events:none; z-index:999; overflow:hidden;
+}
+.confetti-piece {
+  position:absolute; width:10px; height:10px;
+  top:-20px;
+  animation: confetti-fall 3s ease-out forwards;
+}
+@keyframes confetti-fall {
+  0%   { transform:translateY(0) rotate(0deg) scale(1); opacity:1; }
+  100% { transform:translateY(110vh) rotate(720deg) scale(0.3); opacity:0; }
+}
+
+/* ─── Lightning bolts ────────────────────────────────── */
+.lightning-container {
+  position:absolute; top:0; left:0; width:100%; height:100%;
+  pointer-events:none; overflow:hidden;
+}
+.lightning-bolt {
+  position:absolute; opacity:0;
+  animation: lightning-flash 2s ease-in-out infinite;
+}
+.lightning-bolt:nth-child(1) { left:15%; top:10%; animation-delay:0s; }
+.lightning-bolt:nth-child(2) { right:20%; top:5%; animation-delay:0.7s; }
+.lightning-bolt:nth-child(3) { left:60%; top:15%; animation-delay:1.4s; }
+@keyframes lightning-flash {
+  0%,90%,100% { opacity:0; }
+  92%,96% { opacity:0.8; }
+  94% { opacity:0; }
+}
+
+/* ─── Header ──────────────────────────────────────────── */
+.header { display:flex; justify-content:space-between; align-items:center; margin-bottom:20px; }
+.header h2 { font-size:18px; font-weight:700; letter-spacing:-0.3px; }
+.badge {
+  font-size:11px; padding:5px 12px; border-radius:20px;
+  font-weight:600; letter-spacing:0.3px;
+  animation: pulse-badge 2s infinite;
+}
+.badge.online  { background:var(--green-glow); color:var(--green); }
+.badge.offline { background:var(--red-glow); color:var(--red); animation:none; }
+@keyframes pulse-badge {
+  0%,100% { opacity:1; }
+  50% { opacity:0.6; }
+}
+
+/* ─── Card base ───────────────────────────────────────── */
+.card {
+  background: var(--surface);
+  backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 20px;
+  margin-bottom: 14px;
+}
+
+/* ═══════════════════════════════════════════════════════
+   HERO — Liquid Wave Battery + SOC
+   ═══════════════════════════════════════════════════════ */
+.hero { text-align:center; padding:28px 20px; position:relative; overflow:hidden; }
+
+.battery-container {
+  position:relative; display:inline-block; width:160px; height:200px; margin-bottom:16px;
+}
+
+/* Battery outline */
+.battery-body {
+  position:absolute; bottom:0; left:50%; transform:translateX(-50%);
+  width:120px; height:180px;
+  border:3px solid rgba(255,255,255,0.15);
+  border-radius:12px;
+  overflow:hidden;
+  background:rgba(0,0,0,0.3);
+}
+.battery-cap {
+  position:absolute; top:-10px; left:50%; transform:translateX(-50%);
+  width:40px; height:12px;
+  background:rgba(255,255,255,0.15);
+  border-radius:4px 4px 0 0;
+}
+
+/* Liquid fill */
+.liquid {
+  position:absolute; bottom:0; left:0; right:0;
+  transition: height 1.5s cubic-bezier(0.4,0,0.2,1), background 1s;
+  border-radius:0 0 9px 9px;
+}
+.liquid.charging {
+  animation: liquid-glow 1.5s ease-in-out infinite alternate;
+}
+@keyframes liquid-glow {
+  from { filter:brightness(1); }
+  to { filter:brightness(1.3); }
+}
+
+/* Wave SVG overlay */
+.wave-container {
+  position:absolute; left:-10%; width:120%;
+  top:-14px; height:20px; overflow:visible;
+}
+.wave-svg { width:100%; height:100%; }
+.wave-path {
+  animation: wave-drift 3s ease-in-out infinite;
+}
+.wave-path-2 {
+  animation: wave-drift 4s ease-in-out infinite reverse;
+  opacity:0.5;
+}
+@keyframes wave-drift {
+  0%,100% { d: path("M0,10 C30,4 60,16 90,10 C120,4 150,16 180,10 L180,20 L0,20 Z"); }
+  50%     { d: path("M0,10 C30,16 60,4 90,10 C120,16 150,4 180,10 L180,20 L0,20 Z"); }
+}
+
+/* Bubbles inside liquid */
+.bubble {
+  position:absolute; border-radius:50%;
+  background:rgba(255,255,255,0.15);
+  animation: bubble-rise 3s ease-in infinite;
+}
+@keyframes bubble-rise {
+  0%   { transform:translateY(0) scale(1); opacity:0.6; }
+  100% { transform:translateY(-120px) scale(0.3); opacity:0; }
+}
+
+/* SOC over battery */
+.soc-overlay {
+  position:absolute; top:50%; left:50%; transform:translate(-50%,-50%);
+  z-index:2;
+}
+.soc-big { font-size:42px; font-weight:800; letter-spacing:-2px; text-shadow:0 2px 20px rgba(0,0,0,0.5); }
+.soc-big span { font-size:18px; font-weight:500; }
+
+/* Mood emoji */
+.mood-emoji {
+  font-size:32px; margin-top:8px;
+  animation: mood-bounce 2s ease-in-out infinite;
+}
+@keyframes mood-bounce {
+  0%,100% { transform:translateY(0); }
+  50% { transform:translateY(-6px); }
+}
+
+.direction-label {
+  font-size:14px; font-weight:600; margin-top:8px;
+  display:flex; align-items:center; justify-content:center; gap:8px;
+}
+.flow-dot {
+  width:8px; height:8px; border-radius:50%;
+  animation: flow-pulse 1.5s ease-in-out infinite;
+}
+@keyframes flow-pulse {
+  0%,100% { transform:scale(1); opacity:1; }
+  50% { transform:scale(1.8); opacity:0.3; }
+}
+.time-badge {
+  display:inline-block; margin-top:12px; padding:6px 16px;
+  background:var(--blue-glow); color:var(--blue);
+  border-radius:20px; font-size:13px; font-weight:600;
+}
+
+/* ═══════════════════════════════════════════════════════
+   POWER GAUGE (Speedometer)
+   ═══════════════════════════════════════════════════════ */
+.gauge-container {
+  display:flex; justify-content:center; padding:10px 0 6px;
+}
+.gauge-svg { width:200px; height:120px; }
+.gauge-bg { fill:none; stroke:rgba(255,255,255,0.06); stroke-width:14; stroke-linecap:round; }
+.gauge-fill {
+  fill:none; stroke-width:14; stroke-linecap:round;
+  transition: stroke-dashoffset 1s cubic-bezier(0.4,0,0.2,1), stroke 0.5s;
+  filter: drop-shadow(0 0 6px var(--blue-glow));
+}
+.gauge-label-main { font-size:24px; font-weight:800; fill:var(--text); text-anchor:middle; }
+.gauge-label-unit { font-size:11px; fill:var(--muted); text-anchor:middle; }
+.gauge-label-min, .gauge-label-max { font-size:9px; fill:var(--muted); }
+
+/* ═══════════════════════════════════════════════════════
+   POWER FLOW ANIMATION
+   ═══════════════════════════════════════════════════════ */
+.power-flow {
+  display:flex; align-items:center; justify-content:center; gap:12px;
+  padding:16px 12px; position:relative;
+}
+.pf-node {
+  width:52px; height:52px; border-radius:16px;
+  display:flex; align-items:center; justify-content:center; font-size:24px;
+  background:var(--glass); border:1px solid var(--border);
+  transition: box-shadow 0.5s;
+}
+.pf-node.active-glow {
+  box-shadow: 0 0 20px var(--green-glow);
+}
+.pf-arrow { display:flex; gap:4px; align-items:center; }
+.pf-arrow .dot {
+  width:6px; height:6px; border-radius:50%;
+  background:var(--blue); opacity:0.3;
+}
+.pf-arrow.active .dot { animation: arrow-flow 1s ease-in-out infinite; }
+.pf-arrow.active .dot:nth-child(2) { animation-delay:0.15s; }
+.pf-arrow.active .dot:nth-child(3) { animation-delay:0.3s; }
+.pf-arrow.active .dot:nth-child(4) { animation-delay:0.45s; }
+.pf-arrow.active .dot:nth-child(5) { animation-delay:0.6s; }
+.pf-arrow.reverse .dot { animation-direction:reverse; }
+@keyframes arrow-flow {
+  0%   { opacity:0.15; transform:scale(0.6); }
+  50%  { opacity:1;    transform:scale(1.2); }
+  100% { opacity:0.15; transform:scale(0.6); }
+}
+.pf-value {
+  position:absolute; bottom:6px;
+  font-size:11px; color:var(--muted); width:100%; text-align:center;
+}
+
+/* ═══════════════════════════════════════════════════════
+   METRICS GRID
+   ═══════════════════════════════════════════════════════ */
+.metrics { display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:14px; }
+.metric {
+  background:var(--surface); backdrop-filter:blur(12px);
+  border:1px solid var(--border); border-radius:var(--radius-sm);
+  padding:14px 16px;
+  cursor:pointer; -webkit-tap-highlight-color:transparent;
+  transition: transform 0.15s, box-shadow 0.15s;
+}
+.metric:active { transform:scale(0.96); }
+.metric-icon { font-size:20px; margin-bottom:6px; }
+.metric-label { font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:0.5px; }
+.metric-val {
+  font-size:22px; font-weight:700; margin-top:4px; letter-spacing:-0.5px;
+  transition: color 0.4s;
+}
+.metric-sub { font-size:11px; color:var(--muted); margin-top:2px; }
+
+/* ─── Animated number change ─────────────────────────── */
+.metric-val.flash { animation: val-flash 0.4s ease-out; }
+@keyframes val-flash {
+  0% { color:var(--cyan); transform:scale(1.1); }
+  100% { transform:scale(1); }
+}
+
+/* ═══════════════════════════════════════════════════════
+   PILLS
+   ═══════════════════════════════════════════════════════ */
+.pills { display:flex; gap:10px; flex-wrap:wrap; margin-bottom:14px; }
+.pill {
+  flex:1; min-width:100px; padding:12px 14px;
+  background:var(--surface); border:1px solid var(--border);
+  border-radius:var(--radius-sm); backdrop-filter:blur(12px);
+  text-align:center; cursor:pointer; -webkit-tap-highlight-color:transparent;
+  transition: transform 0.15s;
+}
+.pill:active { transform:scale(0.95); }
+.pill-label { font-size:10px; color:var(--muted); text-transform:uppercase; letter-spacing:0.4px; }
+.pill-val { font-size:15px; font-weight:700; margin-top:4px; }
+.pill-val.on  { color:var(--green); }
+.pill-val.off { color:var(--red); }
+
+/* ═══════════════════════════════════════════════════════
+   TEMPERATURES
+   ═══════════════════════════════════════════════════════ */
+.temps-row { display:flex; gap:10px; flex-wrap:wrap; margin-bottom:14px; }
+.temp-chip {
+  flex:1; min-width:80px; padding:12px;
+  background:var(--surface); border:1px solid var(--border);
+  border-radius:var(--radius-sm); text-align:center;
+  position:relative; overflow:hidden;
+}
+.temp-chip::after {
+  content:''; position:absolute; bottom:0; left:0; right:0; height:3px;
+  border-radius:0 0 14px 14px; transition:background 0.4s;
+}
+.temp-chip.cool::after  { background:var(--blue); }
+.temp-chip.ok::after    { background:var(--green); }
+.temp-chip.warm::after  { background:var(--amber); }
+.temp-chip.hot::after   { background:var(--red); }
+.temp-chip .t-label { font-size:10px; color:var(--muted); }
+.temp-chip .t-val { font-size:18px; font-weight:700; margin-top:4px; }
+
+/* Thermometer mini animation */
+.thermo-bar {
+  width:4px; height:20px; background:rgba(255,255,255,0.06);
+  border-radius:2px; margin:6px auto 0; position:relative; overflow:hidden;
+}
+.thermo-fill {
+  position:absolute; bottom:0; width:100%; border-radius:2px;
+  transition: height 0.8s, background 0.5s;
+}
+
+/* ═══════════════════════════════════════════════════════
+   CELLS
+   ═══════════════════════════════════════════════════════ */
+.section-title {
+  font-size:13px; font-weight:700; text-transform:uppercase;
+  letter-spacing:0.6px; color:var(--muted); margin:18px 0 10px;
+  display:flex; justify-content:space-between; align-items:center;
+}
+.section-title .tag {
+  font-size:11px; padding:3px 10px; border-radius:12px; font-weight:600;
+}
+.tag-ok   { background:var(--green-glow); color:var(--green); }
+.tag-warn { background:var(--amber-glow); color:var(--amber); }
+.tag-bad  { background:var(--red-glow);   color:var(--red); }
+
+.cell-row {
+  display:flex; align-items:center; margin-bottom:8px;
+  animation: cell-appear 0.4s ease-out both;
+}
+.cell-row:nth-child(n) { animation-delay: calc(0.02s * var(--i)); }
+@keyframes cell-appear {
+  from { opacity:0; transform:translateX(-12px); }
+  to   { opacity:1; transform:translateX(0); }
+}
+.cell-id { width:32px; font-size:11px; color:var(--muted); font-weight:600; }
+.cell-bar-bg {
+  flex:1; height:10px; background:rgba(255,255,255,0.04);
+  border-radius:5px; overflow:hidden; margin:0 10px;
+}
+.cell-bar-fill {
+  height:100%; border-radius:5px;
+  background:linear-gradient(90deg, var(--blue), var(--cyan));
+  transition:width 0.8s cubic-bezier(0.4,0,0.2,1);
+}
+.cell-bar-fill.low { background:linear-gradient(90deg, var(--red), var(--amber)); }
+.cell-bar-fill.bal {
+  background:linear-gradient(90deg, var(--purple), var(--blue));
+  animation:bal-shimmer 1.5s ease-in-out infinite alternate;
+}
+@keyframes bal-shimmer { from{filter:brightness(1);} to{filter:brightness(1.4);} }
+.cell-v { width:56px; font-size:12px; font-weight:700; text-align:right; }
+.cell-bal { width:16px; text-align:center; font-size:10px; margin-left:4px; }
+
+/* ═══════════════════════════════════════════════════════
+   ERRORS
+   ═══════════════════════════════════════════════════════ */
+.error-card {
+  background:var(--red-glow); border:1px solid rgba(239,68,68,0.3);
+  border-radius:var(--radius-sm); padding:14px 16px; margin-bottom:8px;
+  display:flex; align-items:center; gap:12px;
+  animation: error-shake 0.5s ease-out;
+}
+@keyframes error-shake {
+  0%,100%{transform:translateX(0);}20%{transform:translateX(-6px);}
+  40%{transform:translateX(6px);}60%{transform:translateX(-3px);}80%{transform:translateX(3px);}
+}
+.error-icon { font-size:24px; }
+.error-name { font-size:13px; font-weight:600; }
+.error-sev  { font-size:10px; color:var(--red); text-transform:uppercase; margin-top:2px; }
+.no-errors { text-align:center; padding:20px; color:var(--green); font-size:14px; font-weight:600; }
+
+/* ═══════════════════════════════════════════════════════
+   CHARTS
+   ═══════════════════════════════════════════════════════ */
+.chart-card { padding:16px; }
+.chart-tabs { display:flex; gap:6px; margin-bottom:14px; flex-wrap:wrap; }
+.chart-tab {
+  padding:6px 14px; border-radius:10px; font-size:12px; font-weight:600;
+  background:rgba(255,255,255,0.04); color:var(--muted);
+  border:1px solid transparent; cursor:pointer; transition:all 0.2s;
+  -webkit-tap-highlight-color:transparent;
+}
+.chart-tab.active { background:var(--blue-glow); color:var(--blue); border-color:rgba(59,130,246,0.3); }
+.chart-wrap { position:relative; height:200px; }
+
+/* ═══════════════════════════════════════════════════════
+   CALCULATOR — "На что хватит?"
+   ═══════════════════════════════════════════════════════ */
+.calc-grid { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+.calc-item {
+  background:var(--surface); border:1px solid var(--border);
+  border-radius:var(--radius-sm); padding:14px; text-align:center;
+  cursor:pointer; transition:all 0.2s;
+  -webkit-tap-highlight-color:transparent;
+}
+.calc-item:active { transform:scale(0.95); border-color:var(--blue); }
+.calc-item.selected { border-color:var(--blue); background:var(--blue-glow); }
+.calc-emoji { font-size:28px; }
+.calc-name { font-size:12px; margin-top:6px; color:var(--text); }
+.calc-watts { font-size:10px; color:var(--muted); margin-top:2px; }
+
+.calc-result {
+  text-align:center; padding:24px; margin-top:14px;
+  background:var(--surface); border:1px solid var(--border);
+  border-radius:var(--radius);
+}
+.calc-result-time {
+  font-size:36px; font-weight:800; letter-spacing:-1px;
+  background: linear-gradient(135deg, var(--blue), var(--cyan));
+  -webkit-background-clip:text; -webkit-text-fill-color:transparent;
+  background-clip:text;
+}
+.calc-result-label { font-size:12px; color:var(--muted); margin-top:4px; }
+
+/* Custom watt input */
+.calc-custom {
+  display:flex; gap:10px; margin-top:14px; align-items:center;
+}
+.calc-input {
+  flex:1; padding:12px 16px; border-radius:12px;
+  background:rgba(255,255,255,0.04); border:1px solid var(--border);
+  color:var(--text); font-size:16px; font-weight:600;
+  outline:none; transition:border-color 0.2s;
+}
+.calc-input:focus { border-color:var(--blue); }
+.calc-input::placeholder { color:var(--muted); }
+.calc-btn {
+  padding:12px 20px; border-radius:12px; border:none;
+  background:var(--blue); color:white; font-size:14px; font-weight:700;
+  cursor:pointer; transition:all 0.15s;
+}
+.calc-btn:active { transform:scale(0.95); }
+
+/* ═══════════════════════════════════════════════════════
+   ACHIEVEMENTS
+   ═══════════════════════════════════════════════════════ */
+.achievements { display:flex; flex-direction:column; gap:10px; }
+.ach-item {
+  display:flex; align-items:center; gap:14px;
+  padding:14px; background:var(--surface);
+  border:1px solid var(--border); border-radius:var(--radius-sm);
+  transition:all 0.3s;
+}
+.ach-item.locked { opacity:0.35; filter:grayscale(1); }
+.ach-item.unlocked {
+  border-color:rgba(245,158,11,0.3);
+  animation:ach-glow 2s ease-in-out infinite alternate;
+}
+@keyframes ach-glow {
+  from { box-shadow:0 0 0 rgba(245,158,11,0); }
+  to { box-shadow:0 0 20px rgba(245,158,11,0.15); }
+}
+.ach-icon { font-size:32px; }
+.ach-name { font-size:13px; font-weight:700; }
+.ach-desc { font-size:11px; color:var(--muted); margin-top:2px; }
+
+/* ═══════════════════════════════════════════════════════
+   INFO
+   ═══════════════════════════════════════════════════════ */
+.info-footer { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-top:14px; margin-bottom:20px; }
+.info-item {
+  display:flex; flex-direction:column; padding:10px 14px;
+  background:var(--surface); border:1px solid var(--border);
+  border-radius:var(--radius-sm);
+}
+.info-item .il { font-size:10px; color:var(--muted); text-transform:uppercase; }
+.info-item .iv { font-size:13px; font-weight:600; margin-top:3px; }
+
+/* ═══════════════════════════════════════════════════════
+   BOTTOM NAV (with swipe indicator)
+   ═══════════════════════════════════════════════════════ */
+.nav-tabs {
+  position:fixed; bottom:0; left:0; right:0;
+  display:flex; background:rgba(10,14,26,0.92);
+  backdrop-filter:blur(20px); border-top:1px solid var(--border);
+  padding:8px 4px env(safe-area-inset-bottom,8px);
+  z-index:100;
+}
+.nav-tab {
+  flex:1; text-align:center; padding:6px 0; cursor:pointer;
+  transition:color 0.2s; color:var(--muted);
+  -webkit-tap-highlight-color:transparent;
+}
+.nav-tab.active { color:var(--blue); }
+.nav-tab .nt-icon { font-size:18px; }
+.nav-tab .nt-label { font-size:9px; margin-top:2px; }
+
+/* Active dot under tab */
+.nav-tab::after {
+  content:''; display:block; width:4px; height:4px;
+  border-radius:50%; margin:4px auto 0;
+  background:transparent; transition:background 0.2s;
+}
+.nav-tab.active::after { background:var(--blue); }
+
+/* ─── Page transitions ─────────────────────────────────── */
+.page { display:none; }
+.page.visible { display:block; animation: page-in 0.35s ease-out; }
+.page.slide-left  { animation:slide-left 0.3s ease-out; }
+.page.slide-right { animation:slide-right 0.3s ease-out; }
+@keyframes page-in    { from{opacity:0;transform:translateY(10px);} to{opacity:1;transform:translateY(0);} }
+@keyframes slide-left  { from{opacity:0;transform:translateX(40px);} to{opacity:1;transform:translateX(0);} }
+@keyframes slide-right { from{opacity:0;transform:translateX(-40px);} to{opacity:1;transform:translateX(0);} }
+
+/* Swipe hint */
+.swipe-hint {
+  text-align:center; padding:8px; font-size:11px; color:var(--muted);
+  opacity:0; transition:opacity 0.5s;
+}
+.swipe-hint.show { opacity:1; }
+
+.spinner {
+  display:inline-block; width:12px; height:12px;
+  border:2px solid var(--muted); border-top-color:var(--blue);
+  border-radius:50%; animation:spin 0.8s linear infinite;
+  margin-left:6px; vertical-align:middle;
+}
+@keyframes spin { to{transform:rotate(360deg);} }
+</style>
+</head>
+<body>
+
+<canvas id="particleCanvas"></canvas>
+<div class="bg-gradient" id="bgGradient"></div>
+
+<div class="app-content">
+
+<!-- ═══════ Bottom Navigation ═══════ -->
+<div class="nav-tabs" id="navTabs">
+  <div class="nav-tab active" data-page="main" onclick="switchPage('main',this)">
+    <div class="nt-icon">🏠</div><div class="nt-label">Главная</div>
+  </div>
+  <div class="nav-tab" data-page="cells" onclick="switchPage('cells',this)">
+    <div class="nt-icon">🔋</div><div class="nt-label">Ячейки</div>
+  </div>
+  <div class="nav-tab" data-page="charts" onclick="switchPage('charts',this)">
+    <div class="nt-icon">📈</div><div class="nt-label">Графики</div>
+  </div>
+  <div class="nav-tab" data-page="calc" onclick="switchPage('calc',this)">
+    <div class="nt-icon">🧮</div><div class="nt-label">Калькулятор</div>
+  </div>
+  <div class="nav-tab" data-page="errors" onclick="switchPage('errors',this)">
+    <div class="nt-icon">🛡</div><div class="nt-label">Защита</div>
+  </div>
+  <div class="nav-tab" data-page="info" onclick="switchPage('info',this)">
+    <div class="nt-icon">🏆</div><div class="nt-label">Инфо</div>
+  </div>
+</div>
+
+<div id="confetti-container"></div>
+
+<!-- ═══════════════════════════════════════════════════════
+     PAGE 1 — MAIN DASHBOARD
+     ═══════════════════════════════════════════════════════ -->
+<div id="page-main" class="page visible">
+
+  <div class="header">
+    <h2>⚡ LiFePO4 Power</h2>
+    <div id="status" class="badge online">ONLINE <span class="spinner"></span></div>
+  </div>
+
+  <!-- Liquid Battery -->
+  <div class="card hero" id="heroCard">
+    <!-- Lightning bolts (visible during charging) -->
+    <div class="lightning-container" id="lightnings" style="display:none">
+      <svg class="lightning-bolt" width="24" height="40" viewBox="0 0 24 40"><polygon points="14,0 6,18 12,18 8,40 20,15 13,15 18,0" fill="#fbbf24" opacity="0.7"/></svg>
+      <svg class="lightning-bolt" width="20" height="32" viewBox="0 0 24 40"><polygon points="14,0 6,18 12,18 8,40 20,15 13,15 18,0" fill="#fbbf24" opacity="0.5"/></svg>
+      <svg class="lightning-bolt" width="16" height="28" viewBox="0 0 24 40"><polygon points="14,0 6,18 12,18 8,40 20,15 13,15 18,0" fill="#fbbf24" opacity="0.6"/></svg>
+    </div>
+
+    <div class="battery-container">
+      <div class="battery-cap"></div>
+      <div class="battery-body">
+        <div class="liquid" id="liquid">
+          <div class="wave-container">
+            <svg class="wave-svg" viewBox="0 0 180 20" preserveAspectRatio="none">
+              <path class="wave-path" d="M0,10 C30,4 60,16 90,10 C120,4 150,16 180,10 L180,20 L0,20 Z" fill="currentColor"/>
+              <path class="wave-path-2" d="M0,10 C30,16 60,4 90,10 C120,16 150,4 180,10 L180,20 L0,20 Z" fill="currentColor"/>
+            </svg>
+          </div>
+          <!-- Bubbles injected by JS -->
+        </div>
+        <div class="soc-overlay">
+          <div class="soc-big"><span id="soc">--</span><span>%</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="mood-emoji" id="mood">🔋</div>
+    <div class="direction-label" id="dirLabel">
+      <div class="flow-dot" id="flowDot"></div>
+      <span id="dirText">Загрузка...</span>
+    </div>
+    <div class="time-badge" id="timeBadge">⏱ —</div>
+  </div>
+
+  <!-- Power Gauge (speedometer) -->
+  <div class="card">
+    <div class="gauge-container">
+      <svg class="gauge-svg" viewBox="0 0 200 120">
+        <!-- Arc background -->
+        <path class="gauge-bg" d="M 20 100 A 80 80 0 0 1 180 100" />
+        <!-- Arc fill -->
+        <path id="gaugeFill" class="gauge-fill" d="M 20 100 A 80 80 0 0 1 180 100"
+              stroke="var(--blue)" stroke-dasharray="251" stroke-dashoffset="251"/>
+        <!-- Labels -->
+        <text x="100" y="88" class="gauge-label-main" id="gaugeVal">0</text>
+        <text x="100" y="104" class="gauge-label-unit">Ватт</text>
+        <text x="22" y="116" class="gauge-label-min">0</text>
+        <text x="178" y="116" class="gauge-label-max" text-anchor="end" id="gaugeMax">2000</text>
+      </svg>
+    </div>
+  </div>
+
+  <!-- Power flow -->
+  <div class="card power-flow">
+    <div class="pf-node" id="pfSrc" title="Источник">☀️</div>
+    <div class="pf-arrow" id="arrowIn">
+      <div class="dot"></div><div class="dot"></div><div class="dot"></div><div class="dot"></div><div class="dot"></div>
+    </div>
+    <div class="pf-node" title="Аккумулятор">🔋</div>
+    <div class="pf-arrow" id="arrowOut">
+      <div class="dot"></div><div class="dot"></div><div class="dot"></div><div class="dot"></div><div class="dot"></div>
+    </div>
+    <div class="pf-node" id="pfLoad" title="Нагрузка">🏠</div>
+    <div class="pf-value" id="flowValue">0 Вт</div>
+  </div>
+
+  <!-- Metrics -->
+  <div class="metrics">
+    <div class="metric" onclick="haptic()">
+      <div class="metric-icon">⚡</div>
+      <div class="metric-label">Напряжение</div>
+      <div class="metric-val" id="mVoltage">—</div>
+    </div>
+    <div class="metric" onclick="haptic()">
+      <div class="metric-icon">🌊</div>
+      <div class="metric-label">Ток</div>
+      <div class="metric-val" id="mCurrent">—</div>
+    </div>
+    <div class="metric" onclick="haptic()">
+      <div class="metric-icon">💡</div>
+      <div class="metric-label">Мощность</div>
+      <div class="metric-val" id="mPower">—</div>
+    </div>
+    <div class="metric" onclick="haptic()">
+      <div class="metric-icon">📦</div>
+      <div class="metric-label">Ёмкость</div>
+      <div class="metric-val" id="mCap">—</div>
+      <div class="metric-sub" id="mCapSub"></div>
+    </div>
+    <div class="metric" onclick="haptic()">
+      <div class="metric-icon">⚡</div>
+      <div class="metric-label">Энергия</div>
+      <div class="metric-val" id="mEnergy">—</div>
+      <div class="metric-sub" id="mEnergySub"></div>
+    </div>
+    <div class="metric" onclick="haptic()">
+      <div class="metric-icon">🔄</div>
+      <div class="metric-label">Циклы</div>
+      <div class="metric-val" id="mCycles">—</div>
+    </div>
+  </div>
+
+  <!-- MOS + Health -->
+  <div class="pills">
+    <div class="pill" onclick="haptic()">
+      <div class="pill-label">MOS Заряд</div>
+      <div class="pill-val" id="mosChg">—</div>
+    </div>
+    <div class="pill" onclick="haptic()">
+      <div class="pill-label">MOS Разряд</div>
+      <div class="pill-val" id="mosDis">—</div>
+    </div>
+    <div class="pill" onclick="haptic()">
+      <div class="pill-label">Здоровье</div>
+      <div class="pill-val" id="soh" style="color:var(--green)">—</div>
+    </div>
+  </div>
+
+  <!-- Temps -->
+  <div class="section-title">🌡 Температуры</div>
+  <div class="temps-row" id="tempsRow"></div>
+
+  <div class="swipe-hint" id="swipeHint">← свайпните для навигации →</div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════
+     PAGE 2 — CELLS
+     ═══════════════════════════════════════════════════════ -->
+<div id="page-cells" class="page">
+  <div class="header">
+    <h2>🔗 Ячейки LiFePO4</h2>
+    <div id="cellDelta" class="badge online">Δ 0 мВ</div>
+  </div>
+  <div class="metrics" style="margin-bottom:16px">
+    <div class="metric"><div class="metric-label">Минимум</div><div class="metric-val" id="cellMin" style="color:var(--cyan)">—</div></div>
+    <div class="metric"><div class="metric-label">Максимум</div><div class="metric-val" id="cellMax" style="color:var(--amber)">—</div></div>
+  </div>
+  <div class="section-title">Баланс ячеек<span class="tag tag-ok" id="balTag">ОК</span></div>
+  <div class="card" id="cellsList"></div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════
+     PAGE 3 — CHARTS
+     ═══════════════════════════════════════════════════════ -->
+<div id="page-charts" class="page">
+  <div class="header"><h2>📈 Графики</h2></div>
+  <div class="card chart-card">
+    <div class="chart-tabs">
+      <div class="chart-tab active" onclick="switchChart('soc',this)">Заряд %</div>
+      <div class="chart-tab" onclick="switchChart('voltage',this)">Напряжение</div>
+      <div class="chart-tab" onclick="switchChart('current',this)">Ток</div>
+      <div class="chart-tab" onclick="switchChart('power',this)">Мощность</div>
+      <div class="chart-tab" onclick="switchChart('temp',this)">Температура</div>
+    </div>
+    <div class="chart-wrap"><canvas id="mainChart"></canvas></div>
+  </div>
+  <div class="metrics">
+    <div class="metric" style="padding:10px">
+      <div class="metric-label">Заряд</div>
+      <canvas id="sparkSoc" height="40"></canvas>
+    </div>
+    <div class="metric" style="padding:10px">
+      <div class="metric-label">Мощность</div>
+      <canvas id="sparkPower" height="40"></canvas>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════
+     PAGE 4 — CALCULATOR
+     ═══════════════════════════════════════════════════════ -->
+<div id="page-calc" class="page">
+  <div class="header"><h2>🧮 На что хватит?</h2></div>
+
+  <div class="calc-grid" id="calcGrid">
+    <div class="calc-item" onclick="selectDevice(this,5)"><div class="calc-emoji">💡</div><div class="calc-name">LED лампа</div><div class="calc-watts">5 Вт</div></div>
+    <div class="calc-item" onclick="selectDevice(this,12)"><div class="calc-emoji">📱</div><div class="calc-name">Зарядка телефона</div><div class="calc-watts">12 Вт</div></div>
+    <div class="calc-item" onclick="selectDevice(this,25)"><div class="calc-emoji">📡</div><div class="calc-name">Wi-Fi роутер</div><div class="calc-watts">25 Вт</div></div>
+    <div class="calc-item" onclick="selectDevice(this,60)"><div class="calc-emoji">💻</div><div class="calc-name">Ноутбук</div><div class="calc-watts">60 Вт</div></div>
+    <div class="calc-item" onclick="selectDevice(this,100)"><div class="calc-emoji">📺</div><div class="calc-name">Телевизор</div><div class="calc-watts">100 Вт</div></div>
+    <div class="calc-item" onclick="selectDevice(this,150)"><div class="calc-emoji">🧊</div><div class="calc-name">Мини-холодильник</div><div class="calc-watts">150 Вт</div></div>
+    <div class="calc-item" onclick="selectDevice(this,350)"><div class="calc-emoji">🖥</div><div class="calc-name">Компьютер</div><div class="calc-watts">350 Вт</div></div>
+    <div class="calc-item" onclick="selectDevice(this,1000)"><div class="calc-emoji">🔌</div><div class="calc-name">Электрочайник</div><div class="calc-watts">1000 Вт</div></div>
+  </div>
+
+  <div class="calc-custom">
+    <input class="calc-input" id="customWatts" type="number" placeholder="Свои ватты..." inputmode="numeric">
+    <button class="calc-btn" onclick="calcCustom()">Рассчитать</button>
+  </div>
+
+  <div class="calc-result" id="calcResult">
+    <div class="calc-result-time" id="calcTime">—</div>
+    <div class="calc-result-label" id="calcLabel">Выберите устройство</div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════
+     PAGE 5 — ERRORS / PROTECTION
+     ═══════════════════════════════════════════════════════ -->
+<div id="page-errors" class="page">
+  <div class="header"><h2>🛡 Защита и ошибки</h2></div>
+  <div id="errorsContainer" class="no-errors">✅ Все системы в норме</div>
+  <div class="section-title" style="margin-top:24px">Статус защит</div>
+  <div id="protectionGrid" class="card" style="padding:12px"></div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════
+     PAGE 6 — INFO + ACHIEVEMENTS
+     ═══════════════════════════════════════════════════════ -->
+<div id="page-info" class="page">
+  <div class="header"><h2>🏆 Достижения и Инфо</h2></div>
+
+  <div class="section-title">🏅 Достижения</div>
+  <div class="achievements" id="achList"></div>
+
+  <div class="section-title" style="margin-top:20px">📋 Системная информация</div>
+  <div class="info-footer" id="infoGrid">
+    <div class="info-item"><span class="il">Прошивка</span><span class="iv" id="iFw">—</span></div>
+    <div class="info-item"><span class="il">Железо</span><span class="iv" id="iHw">—</span></div>
+    <div class="info-item"><span class="il">Дата пр-ва</span><span class="iv" id="iDate">—</span></div>
+    <div class="info-item"><span class="il">Кол-во ячеек</span><span class="iv" id="iCells">—</span></div>
+    <div class="info-item"><span class="il">Ёмкость полн.</span><span class="iv" id="iCapFull">—</span></div>
+    <div class="info-item"><span class="il">Циклов</span><span class="iv" id="iCycles">—</span></div>
+    <div class="info-item"><span class="il">Аптайм</span><span class="iv" id="iUptime">—</span></div>
+    <div class="info-item"><span class="il">Ошибки связи</span><span class="iv" id="iConnErr">0</span></div>
+  </div>
+</div>
+
+</div><!-- /app-content -->
+
+<script>
+/* ═══════════════════════════════════════════════════════
+   INIT
+   ═══════════════════════════════════════════════════════ */
+const tg = window.Telegram && window.Telegram.WebApp;
+if (tg) { tg.expand(); tg.ready(); }
+
+function haptic(type='impact') {
+  if (tg && tg.HapticFeedback) {
+    if (type==='impact') tg.HapticFeedback.impactOccurred('light');
+    else if (type==='success') tg.HapticFeedback.notificationOccurred('success');
+    else if (type==='error') tg.HapticFeedback.notificationOccurred('error');
+  }
+}
+
+/* ═══════════════════════════════════════════════════════
+   PARTICLES
+   ═══════════════════════════════════════════════════════ */
+const cvs = document.getElementById('particleCanvas');
+const ctx = cvs.getContext('2d');
+let particles = [];
+let particleDirection = 0; // -1 discharge, 1 charge, 0 idle
+
+function resizeCanvas() {
+  cvs.width = window.innerWidth;
+  cvs.height = window.innerHeight;
+}
+resizeCanvas();
+window.addEventListener('resize', resizeCanvas);
+
+function initParticles() {
+  particles = [];
+  for (let i = 0; i < 40; i++) {
+    particles.push({
+      x: Math.random() * cvs.width,
+      y: Math.random() * cvs.height,
+      r: Math.random() * 2 + 0.5,
+      vx: (Math.random() - 0.5) * 0.5,
+      vy: (Math.random() - 0.5) * 0.5,
+      alpha: Math.random() * 0.3 + 0.05,
+    });
+  }
+}
+initParticles();
+
+function drawParticles() {
+  ctx.clearRect(0, 0, cvs.width, cvs.height);
+  particles.forEach(p => {
+    p.x += p.vx + particleDirection * 0.3;
+    p.y += p.vy;
+    if (p.x < 0) p.x = cvs.width;
+    if (p.x > cvs.width) p.x = 0;
+    if (p.y < 0) p.y = cvs.height;
+    if (p.y > cvs.height) p.y = 0;
+
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+    const color = particleDirection > 0 ? '34,197,94' : particleDirection < 0 ? '245,158,11' : '100,116,139';
+    ctx.fillStyle = `rgba(${color},${p.alpha})`;
+    ctx.fill();
+  });
+  requestAnimationFrame(drawParticles);
+}
+drawParticles();
+
+/* ═══════════════════════════════════════════════════════
+   CONFETTI
+   ═══════════════════════════════════════════════════════ */
+let confettiShown = false;
+function showConfetti() {
+  if (confettiShown) return;
+  confettiShown = true;
+  haptic('success');
+  const container = document.getElementById('confetti-container');
+  const colors = ['#22c55e','#3b82f6','#f59e0b','#ef4444','#a855f7','#06b6d4','#ec4899','#fbbf24'];
+  for (let i = 0; i < 80; i++) {
+    const el = document.createElement('div');
+    el.className = 'confetti-piece';
+    el.style.left = Math.random()*100+'%';
+    el.style.animationDelay = Math.random()*1.5+'s';
+    el.style.animationDuration = (2+Math.random()*2)+'s';
+    el.style.background = colors[Math.floor(Math.random()*colors.length)];
+    el.style.borderRadius = Math.random()>0.5?'50%':'2px';
+    el.style.width = (6+Math.random()*8)+'px';
+    el.style.height = (6+Math.random()*8)+'px';
+    container.appendChild(el);
+  }
+  setTimeout(() => { container.innerHTML = ''; confettiShown = false; }, 4000);
+}
+
+/* ═══════════════════════════════════════════════════════
+   BUBBLES in battery
+   ═══════════════════════════════════════════════════════ */
+function spawnBubble() {
+  const liquid = document.getElementById('liquid');
+  if (!liquid || parseFloat(liquid.style.height) < 10) return;
+  const b = document.createElement('div');
+  b.className = 'bubble';
+  b.style.left = (15 + Math.random()*70) + '%';
+  b.style.bottom = '5px';
+  b.style.width = b.style.height = (3+Math.random()*5)+'px';
+  b.style.animationDuration = (2+Math.random()*2)+'s';
+  liquid.appendChild(b);
+  setTimeout(() => b.remove(), 4000);
+}
+setInterval(spawnBubble, 800);
+
+/* ═══════════════════════════════════════════════════════
+   NAVIGATION + SWIPE
+   ═══════════════════════════════════════════════════════ */
+const PAGE_ORDER = ['main','cells','charts','calc','errors','info'];
+let currentPageIdx = 0;
+
+function switchPage(name, tabEl) {
+  const newIdx = PAGE_ORDER.indexOf(name);
+  const dir = newIdx > currentPageIdx ? 'left' : 'right';
+  currentPageIdx = newIdx;
+
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('visible','slide-left','slide-right'));
+  document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
+
+  const page = document.getElementById('page-'+name);
+  page.classList.add('visible', dir === 'left' ? 'slide-left' : 'slide-right');
+
+  if (tabEl) tabEl.classList.add('active');
+  else document.querySelector(`.nav-tab[data-page="${name}"]`).classList.add('active');
+
+  haptic();
+  if (name === 'charts' && mainChart) setTimeout(() => mainChart.resize(), 50);
+}
+
+// Swipe detection
+let touchStartX = 0, touchEndX = 0;
+document.addEventListener('touchstart', e => { touchStartX = e.changedTouches[0].screenX; }, {passive:true});
+document.addEventListener('touchend', e => {
+  touchEndX = e.changedTouches[0].screenX;
+  const diff = touchStartX - touchEndX;
+  if (Math.abs(diff) > 60) {
+    if (diff > 0 && currentPageIdx < PAGE_ORDER.length-1) switchPage(PAGE_ORDER[currentPageIdx+1]);
+    else if (diff < 0 && currentPageIdx > 0) switchPage(PAGE_ORDER[currentPageIdx-1]);
+  }
+}, {passive:true});
+
+// Show swipe hint once
+setTimeout(() => {
+  const h = document.getElementById('swipeHint');
+  h.classList.add('show');
+  setTimeout(() => h.classList.remove('show'), 3000);
+}, 2000);
+
+/* ═══════════════════════════════════════════════════════
+   CHARTS
+   ═══════════════════════════════════════════════════════ */
+Chart.defaults.color = '#64748b';
+Chart.defaults.borderColor = 'rgba(255,255,255,0.04)';
+let mainChart, sparkSoc, sparkPower, activeChart = 'soc';
+const CHART_COLORS = {
+  soc:     {border:'#22c55e',bg:'rgba(34,197,94,0.1)'},
+  voltage: {border:'#3b82f6',bg:'rgba(59,130,246,0.1)'},
+  current: {border:'#f59e0b',bg:'rgba(245,158,11,0.1)'},
+  power:   {border:'#a855f7',bg:'rgba(168,85,247,0.1)'},
+  temp:    {border:'#ef4444',bg:'rgba(239,68,68,0.1)'},
+};
+
+function initCharts() {
+  const base = {
+    responsive:true,maintainAspectRatio:false,
+    animation:{duration:600,easing:'easeOutQuart'},
+    plugins:{legend:{display:false}},
+    scales:{x:{display:false},y:{ticks:{font:{size:10}},grid:{color:'rgba(255,255,255,0.03)'}}},
+    elements:{point:{radius:0},line:{borderWidth:2}},
+    interaction:{intersect:false,mode:'index'}
+  };
+  mainChart = new Chart(document.getElementById('mainChart'),{type:'line',data:{labels:[],datasets:[{data:[],borderColor:'#22c55e',backgroundColor:'rgba(34,197,94,0.1)',fill:true,tension:0.4}]},options:base});
+  const sparkO = {responsive:true,maintainAspectRatio:false,animation:false,plugins:{legend:{display:false}},scales:{x:{display:false},y:{display:false}},elements:{point:{radius:0},line:{borderWidth:1.5}}};
+  sparkSoc = new Chart(document.getElementById('sparkSoc'),{type:'line',data:{labels:[],datasets:[{data:[],borderColor:'#22c55e',fill:false,tension:0.4}]},options:sparkO});
+  sparkPower = new Chart(document.getElementById('sparkPower'),{type:'line',data:{labels:[],datasets:[{data:[],borderColor:'#a855f7',fill:false,tension:0.4}]},options:sparkO});
+}
+
+function switchChart(type, el) {
+  activeChart = type;
+  document.querySelectorAll('.chart-tab').forEach(t=>t.classList.remove('active'));
+  if(el) el.classList.add('active');
+  updateChartData(lastData);
+  haptic();
+}
+
+function updateChartData(d) {
+  if (!mainChart||!d.history_ts) return;
+  const labels = d.history_ts.map(t=>{const ago=Math.round((Date.now()/1000-t)/60); return ago>0?`-${ago}м`:'⬤';});
+  const MAP = {soc:d.history_soc,voltage:d.history_voltage,current:d.history_current,power:d.history_power,temp:d.history_temp};
+  const cc = CHART_COLORS[activeChart];
+  mainChart.data.labels=labels;mainChart.data.datasets[0].data=MAP[activeChart]||[];
+  mainChart.data.datasets[0].borderColor=cc.border;mainChart.data.datasets[0].backgroundColor=cc.bg;
+  mainChart.update('none');
+  sparkSoc.data.labels=labels;sparkSoc.data.datasets[0].data=d.history_soc||[];sparkSoc.update('none');
+  sparkPower.data.labels=labels;sparkPower.data.datasets[0].data=d.history_power||[];sparkPower.update('none');
+}
+
+/* ═══════════════════════════════════════════════════════
+   CALCULATOR
+   ═══════════════════════════════════════════════════════ */
+let selectedWatts = 0;
+
+function selectDevice(el, watts) {
+  haptic();
+  document.querySelectorAll('.calc-item').forEach(i=>i.classList.remove('selected'));
+  el.classList.add('selected');
+  selectedWatts = watts;
+  calcTime(watts);
+}
+
+function calcCustom() {
+  const w = parseFloat(document.getElementById('customWatts').value);
+  if (!w || w <= 0) return;
+  haptic();
+  document.querySelectorAll('.calc-item').forEach(i=>i.classList.remove('selected'));
+  selectedWatts = w;
+  calcTime(w);
+}
+
+function calcTime(watts) {
+  const d = lastData;
+  if (!d.energy_remain_wh || d.energy_remain_wh <= 0) {
+    document.getElementById('calcTime').textContent = '—';
+    document.getElementById('calcLabel').textContent = 'Нет данных BMS';
+    return;
+  }
+  const hours = d.energy_remain_wh / watts;
+  const hrs = Math.floor(hours);
+  const mins = Math.round((hours - hrs) * 60);
+  if (hours < 1) {
+    document.getElementById('calcTime').textContent = `${mins} мин`;
+  } else if (hours > 24) {
+    const days = Math.floor(hours/24);
+    const remHrs = Math.floor(hours%24);
+    document.getElementById('calcTime').textContent = `${days} д ${remHrs} ч`;
+  } else {
+    document.getElementById('calcTime').textContent = `${hrs} ч ${mins} мин`;
+  }
+  document.getElementById('calcLabel').textContent = `${watts} Вт × ${d.energy_remain_wh.toFixed(0)} Вт·ч`;
+}
+
+/* ═══════════════════════════════════════════════════════
+   ACHIEVEMENTS
+   ═══════════════════════════════════════════════════════ */
+const ACHIEVEMENTS = [
+  { id:'first_charge',  icon:'🔌', name:'Первый контакт',      desc:'Подключение к BMS установлено',       check: d=> d.status==='Online' },
+  { id:'full_charge',   icon:'💯', name:'Полный бак',          desc:'Заряд достиг 100%',                   check: d=> d.soc>=100 },
+  { id:'survivor',      icon:'🪫', name:'На последнем дыхании', desc:'Заряд опускался ниже 10%',            check: d=> d.soc<=10 && d.soc>0 },
+  { id:'hot_stuff',     icon:'🔥', name:'Горячая штучка',       desc:'Температура превысила 40°C',          check: d=> d.temp_max>40 },
+  { id:'ice_cold',      icon:'🧊', name:'Ледяной воин',         desc:'Температура ниже 5°C',                check: d=> d.temp_min<5 && d.temps&&d.temps.length>0 },
+  { id:'balanced',      icon:'⚖️', name:'Идеальный баланс',    desc:'Разброс ячеек менее 5 мВ',            check: d=> d.cell_delta_mv<5 && d.cells&&d.cells.length>0 },
+  { id:'cycles_10',     icon:'🔄', name:'Десятка',              desc:'Пройдено 10 циклов',                  check: d=> d.cycles>=10 },
+  { id:'cycles_100',    icon:'💪', name:'Сотня',                desc:'Пройдено 100 циклов',                 check: d=> d.cycles>=100 },
+  { id:'cycles_500',    icon:'🏆', name:'Марафонец',            desc:'Пройдено 500 циклов',                 check: d=> d.cycles>=500 },
+  { id:'powerhouse',    icon:'⚡', name:'Электростанция',       desc:'Мощность превысила 500 Вт',           check: d=> d.power>500 },
+  { id:'night_owl',     icon:'🦉', name:'Ночная сова',          desc:'Мониторинг работает > 12 часов',      check: d=> d.uptime_str && d.uptime_str.includes('ч') && parseInt(d.uptime_str)>=12 },
+  { id:'error_free',    icon:'✅', name:'Безупречная работа',   desc:'0 ошибок связи при >1ч аптайма',      check: d=> (d.connection_errors||0)===0 && d.uptime_str && d.uptime_str.includes('ч') },
+];
+
+let unlockedAch = new Set(JSON.parse(localStorage.getItem('bms_ach')||'[]'));
+
+function checkAchievements(d) {
+  let newUnlock = false;
+  ACHIEVEMENTS.forEach(a => {
+    if (!unlockedAch.has(a.id) && a.check(d)) {
+      unlockedAch.add(a.id);
+      newUnlock = true;
+    }
+  });
+  if (newUnlock) {
+    localStorage.setItem('bms_ach', JSON.stringify([...unlockedAch]));
+    haptic('success');
+  }
+  renderAchievements();
+}
+
+function renderAchievements() {
+  let html = '';
+  ACHIEVEMENTS.forEach(a => {
+    const unlocked = unlockedAch.has(a.id);
+    html += `<div class="ach-item ${unlocked?'unlocked':'locked'}">
+      <div class="ach-icon">${a.icon}</div>
+      <div><div class="ach-name">${unlocked?a.name:'???'}</div><div class="ach-desc">${a.desc}</div></div>
+    </div>`;
+  });
+  document.getElementById('achList').innerHTML = html;
+}
+
+/* ═══════════════════════════════════════════════════════
+   PROTECTION GRID
+   ═══════════════════════════════════════════════════════ */
+const ALL_P = [
+  {bit:0,name:"Перенапр. ячейки"},{bit:1,name:"Низк.напр. ячейки"},
+  {bit:2,name:"Перенапр. пакета"},{bit:3,name:"Низк.напр. пакета"},
+  {bit:4,name:"Перегрев заряд"},{bit:5,name:"Переохл. заряд"},
+  {bit:6,name:"Перегрев разряд"},{bit:7,name:"Переохл. разряд"},
+  {bit:8,name:"Переток заряд"},{bit:9,name:"Переток разряд"},
+  {bit:10,name:"Короткое замыкание"},{bit:11,name:"Ошибка IC"},
+  {bit:12,name:"MOS заблокирован"},
+];
+
+function renderProtectionGrid(raw) {
+  let html='<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">';
+  ALL_P.forEach(p=>{
+    const a=(raw>>p.bit)&1;
+    html+=`<div style="padding:8px 10px;border-radius:10px;background:${a?'var(--red-glow)':'rgba(255,255,255,0.02)'};display:flex;align-items:center;gap:8px">
+      <span style="font-size:10px">${a?'🔴':'🟢'}</span>
+      <span style="font-size:11px;color:${a?'var(--red)':'var(--muted)'}">${p.name}</span>
+    </div>`;
+  });
+  html+='</div>';
+  document.getElementById('protectionGrid').innerHTML=html;
+}
+
+/* ═══════════════════════════════════════════════════════
+   ANIMATED NUMBER COUNTER
+   ═══════════════════════════════════════════════════════ */
+const prevValues = {};
+function animateValue(el, key, newText, newNum) {
+  const prev = prevValues[key];
+  if (prev !== undefined && prev !== newNum) {
+    el.classList.remove('flash');
+    void el.offsetWidth; // reflow
+    el.classList.add('flash');
+  }
+  prevValues[key] = newNum;
+  el.textContent = newText;
+}
+
+/* ═══════════════════════════════════════════════════════
+   DYNAMIC BACKGROUND
+   ═══════════════════════════════════════════════════════ */
+function updateBackground(soc, direction) {
+  const g = document.getElementById('bgGradient');
+  if (direction === 'charging') {
+    g.style.background = 'radial-gradient(ellipse at 50% 50%, rgba(34,197,94,0.08) 0%, transparent 60%)';
+  } else if (direction === 'discharging') {
+    g.style.background = 'radial-gradient(ellipse at 50% 50%, rgba(245,158,11,0.06) 0%, transparent 60%)';
+  } else {
+    g.style.background = 'radial-gradient(ellipse at 50% 50%, rgba(59,130,246,0.04) 0%, transparent 60%)';
+  }
+}
+
+/* ═══════════════════════════════════════════════════════
+   MAIN DATA FETCH
+   ═══════════════════════════════════════════════════════ */
+let lastData = {};
+
+async function fetchData() {
+  try {
+    const res = await fetch('/api/bms');
+    const d = await res.json();
+    lastData = d;
+
+    // Status
+    const sEl = document.getElementById('status');
+    if (d.status==='Online') { sEl.className='badge online'; sEl.innerHTML='ONLINE <span class="spinner"></span>'; }
+    else { sEl.className='badge offline'; sEl.textContent=d.status; }
+
+    const pct = d.soc||0;
+
+    // ─── Liquid battery ─────────
+    const liquid = document.getElementById('liquid');
+    liquid.style.height = Math.max(pct, 3) + '%';
+    if (pct > 50) { liquid.style.background = 'linear-gradient(0deg, #16a34a, #22c55e)'; liquid.style.color='#22c55e'; }
+    else if (pct > 20) { liquid.style.background = 'linear-gradient(0deg, #d97706, #f59e0b)'; liquid.style.color='#f59e0b'; }
+    else { liquid.style.background = 'linear-gradient(0deg, #dc2626, #ef4444)'; liquid.style.color='#ef4444'; }
+    if (d.direction==='charging') liquid.classList.add('charging'); else liquid.classList.remove('charging');
+    document.getElementById('soc').textContent = pct;
+
+    // Lightning bolts during charging
+    document.getElementById('lightnings').style.display = d.direction==='charging' ? 'block' : 'none';
+
+    // Confetti at 100%
+    if (pct >= 100) showConfetti();
+
+    // Mood emoji
+    const mood = document.getElementById('mood');
+    if (pct >= 90) mood.textContent = '😄';
+    else if (pct >= 70) mood.textContent = '😊';
+    else if (pct >= 50) mood.textContent = '🙂';
+    else if (pct >= 30) mood.textContent = '😐';
+    else if (pct >= 15) mood.textContent = '😟';
+    else mood.textContent = '😵';
+
+    // Direction
+    const dirText = document.getElementById('dirText');
+    const dot = document.getElementById('flowDot');
+    if (d.direction==='charging') {
+      dirText.textContent='⚡ Зарядка'; dirText.style.color='var(--green)';
+      dot.style.background='var(--green)'; dot.style.animation='';
+      particleDirection=1;
+    } else if (d.direction==='discharging') {
+      dirText.textContent='🏠 Питание нагрузки'; dirText.style.color='var(--amber)';
+      dot.style.background='var(--amber)'; dot.style.animation='';
+      particleDirection=-1;
+    } else {
+      dirText.textContent='⏸ В покое'; dirText.style.color='var(--muted)';
+      dot.style.background='var(--muted)'; dot.style.animation='none';
+      particleDirection=0;
+    }
+    document.getElementById('timeBadge').textContent='⏱ '+d.time_remaining_str;
+
+    // Power Gauge
+    const maxPow = Math.max(500, Math.ceil(d.power/100)*100+200);
+    const gaugeArc = 251;
+    const gPct = Math.min(d.power/maxPow, 1);
+    const gFill = document.getElementById('gaugeFill');
+    gFill.style.strokeDashoffset = gaugeArc - gPct*gaugeArc;
+    if(gPct>0.8){gFill.style.stroke='var(--red)';}else if(gPct>0.5){gFill.style.stroke='var(--amber)';}else{gFill.style.stroke='var(--blue)';}
+    document.getElementById('gaugeVal').textContent = d.power;
+    document.getElementById('gaugeMax').textContent = maxPow+'W';
+
+    // Power flow
+    document.getElementById('arrowIn').className='pf-arrow'+(d.direction==='charging'?' active':'');
+    document.getElementById('arrowOut').className='pf-arrow'+(d.direction==='discharging'?' active':'');
+    document.getElementById('pfSrc').classList.toggle('active-glow',d.direction==='charging');
+    document.getElementById('pfLoad').classList.toggle('active-glow',d.direction==='discharging');
+    document.getElementById('flowValue').textContent=d.power+' Вт';
+
+    // Metrics with animated counters
+    animateValue(document.getElementById('mVoltage'),'v',d.voltage+' В',d.voltage);
+    const curEl = document.getElementById('mCurrent');
+    animateValue(curEl,'i',d.current+' А',d.current);
+    curEl.style.color = d.current>0.1?'var(--green)':d.current<-0.1?'var(--amber)':'var(--text)';
+    const pwrEl = document.getElementById('mPower');
+    animateValue(pwrEl,'p',d.power+' Вт',d.power);
+    pwrEl.style.color=d.direction==='charging'?'var(--green)':d.direction==='discharging'?'var(--amber)':'var(--text)';
+    animateValue(document.getElementById('mCap'),'cap',d.capacity_remain+' Ач',d.capacity_remain);
+    document.getElementById('mCapSub').textContent='из '+d.capacity_total+' Ач';
+    animateValue(document.getElementById('mEnergy'),'en',d.energy_remain_wh+' Вт·ч',d.energy_remain_wh);
+    document.getElementById('mEnergySub').textContent='из '+d.energy_total_wh+' Вт·ч';
+    document.getElementById('mCycles').textContent=d.cycles;
+
+    // MOS
+    const mc=document.getElementById('mosChg');mc.textContent=d.charge_mosfet?'✅ ВКЛ':'❌ ВЫКЛ';mc.className='pill-val '+(d.charge_mosfet?'on':'off');
+    const md=document.getElementById('mosDis');md.textContent=d.discharge_mosfet?'✅ ВКЛ':'❌ ВЫКЛ';md.className='pill-val '+(d.discharge_mosfet?'on':'off');
+    const sohEl=document.getElementById('soh');sohEl.textContent=d.soh_estimate+'%';
+    sohEl.style.color=d.soh_estimate>80?'var(--green)':d.soh_estimate>50?'var(--amber)':'var(--red)';
+
+    // Temps
+    renderTemps(d.temps);
+    // Cells
+    renderCells(d);
+    // Errors
+    renderErrors(d);
+    renderProtectionGrid(d.protection_raw||0);
+    // Charts
+    updateChartData(d);
+    // Calculator (update if device selected)
+    if(selectedWatts>0) calcTime(selectedWatts);
+    // Background
+    updateBackground(pct, d.direction);
+    // Achievements
+    checkAchievements(d);
+
+    // Info
+    document.getElementById('iFw').textContent='v'+d.sw_version;
+    document.getElementById('iHw').textContent=d.hw_version;
+    document.getElementById('iDate').textContent=d.production_date;
+    document.getElementById('iCells').textContent=d.num_cells+'S';
+    document.getElementById('iCapFull').textContent=d.capacity_total+' Ач';
+    document.getElementById('iCycles').textContent=d.cycles;
+    document.getElementById('iUptime').textContent=d.uptime_str;
+    document.getElementById('iConnErr').textContent=d.connection_errors||0;
+
+  } catch(e) { console.error(e); }
+}
+
+/* ═══════════════════════════════════════════════════════
+   RENDERERS
+   ═══════════════════════════════════════════════════════ */
+function renderTemps(temps) {
+  const c=document.getElementById('tempsRow');
+  if(!temps||!temps.length){c.innerHTML='<div style="color:var(--muted);font-size:13px">Нет данных</div>';return;}
+  let html='';
+  temps.forEach((t,i)=>{
+    let cls='cool'; if(t>45)cls='hot'; else if(t>35)cls='warm'; else if(t>15)cls='ok';
+    const thermoH = Math.min(Math.max((t/60)*100,5),100);
+    const thermoCol = cls==='hot'?'var(--red)':cls==='warm'?'var(--amber)':cls==='ok'?'var(--green)':'var(--blue)';
+    html+=`<div class="temp-chip ${cls}">
+      <div class="t-label">NTC ${i+1}</div>
+      <div class="t-val">${t}°</div>
+      <div class="thermo-bar"><div class="thermo-fill" style="height:${thermoH}%;background:${thermoCol}"></div></div>
+    </div>`;
+  });
+  c.innerHTML=html;
+}
+
+function renderCells(d) {
+  if(!d.cells||!d.cells.length)return;
+  document.getElementById('cellMin').textContent=d.cell_min.toFixed(3)+' В';
+  document.getElementById('cellMax').textContent=d.cell_max.toFixed(3)+' В';
+  const de=document.getElementById('cellDelta');de.textContent='Δ '+d.cell_delta_mv+' мВ';
+  de.className='badge '+(d.cell_delta_mv<15?'online':'offline');
+  const bt=document.getElementById('balTag');
+  if(d.cell_delta_mv<10){bt.textContent='Отлично';bt.className='tag tag-ok';}
+  else if(d.cell_delta_mv<30){bt.textContent='Норма';bt.className='tag tag-warn';}
+  else{bt.textContent='Разбаланс!';bt.className='tag tag-bad';}
+  let html='';
+  d.cells.forEach((c,i)=>{
+    const pct=Math.min(Math.max(((c-2.8)/(3.45-2.8))*100,3),100);
+    const isLow=c<3.0; const isBal=d.balance_status&&d.balance_status[i];
+    let barCls='cell-bar-fill'; if(isBal)barCls+=' bal'; else if(isLow)barCls+=' low';
+    html+=`<div class="cell-row" style="--i:${i}">
+      <div class="cell-id">#${i+1}</div>
+      <div class="cell-bar-bg"><div class="${barCls}" style="width:${pct}%"></div></div>
+      <div class="cell-v">${c.toFixed(3)}</div>
+      <div class="cell-bal">${isBal?'⚖️':''}</div>
+    </div>`;
+  });
+  document.getElementById('cellsList').innerHTML=html;
+}
+
+function renderErrors(d) {
+  const c=document.getElementById('errorsContainer');
+  const tab=document.querySelector('.nav-tab[data-page="errors"] .nt-icon');
+  if(!d.has_errors){c.innerHTML='<div class="no-errors">✅ Все системы в норме — ошибок нет</div>';tab.textContent='🛡';return;}
+  tab.textContent='🚨';
+  let html='';
+  d.errors.forEach(e=>{html+=`<div class="error-card"><div class="error-icon">${e.icon}</div><div><div class="error-name">${e.name}</div><div class="error-sev">${e.severity}</div></div></div>`;});
+  c.innerHTML=html;
+}
+
+/* ─── Init ────────────────────────────────────────────── */
+initCharts();
+renderAchievements();
+fetchData();
+setInterval(fetchData, 2000);
+</script>
+</body>
+</html>

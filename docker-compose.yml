@@ -1,0 +1,40 @@
+version: '3.8'
+
+services:
+  # ═══════════════════════════════════════════════════════
+  # Основной сервис: BMS Monitor + Telegram Bot + Web App
+  # ═══════════════════════════════════════════════════════
+  bms-monitor:
+    build: .
+    container_name: jbd_bms_monitor
+    restart: always
+    network_mode: host
+    privileged: true
+    volumes:
+      # Проброс D-Bus для доступа к Bluetooth хоста
+      - /var/run/dbus:/var/run/dbus:ro
+    env_file:
+      - .env
+    depends_on:
+      cloudflared:
+        condition: service_started
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ═══════════════════════════════════════════════════════
+  # Cloudflare Tunnel — бесплатный HTTPS для Telegram WebApp
+  # ═══════════════════════════════════════════════════════
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: bms_tunnel
+    restart: always
+    network_mode: host
+    command: tunnel --no-autoupdate --url http://localhost:8000
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "2"
